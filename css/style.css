@@ -132,3 +132,98 @@ textarea:focus { outline: none; border-color: var(--navy); box-shadow: 0 0 0 3px
   .kartu-login { margin: 16px auto; padding: 20px; }
   .tabel-wrap table { min-width: 560px; }
 }
+
+/* ============================================
+   FOTO LATAR & RESPONSIVE (rev. 2)
+   Foto: assets/perumahan.jpg (landscape, min. 1600px).
+   Jika foto belum ada, latar tetap tampil dengan warna navy.
+   ============================================ */
+:root { --foto-rumah: url('../assets/perumahan.jpg'); }
+
+html, body { overflow-x: hidden; }
+
+/* Latar halaman login: foto perumahan dengan lapisan navy */
+body.bg-login {
+  min-height: 100vh;
+  background:
+    linear-gradient(160deg, rgba(0,37,71,.78) 0%, rgba(15,59,102,.62) 60%, rgba(62,142,65,.35) 100%),
+    var(--foto-rumah) center / cover no-repeat fixed,
+    var(--navy-d);
+}
+body.bg-login .kartu-login { margin: 8vh auto; }
+body.bg-login .kartu-login h1,
+body.bg-login .kartu-login .muted,
+body.bg-login .kartu-login .tengah { color: var(--ink); }
+body.bg-login .kartu-login .tengah.muted { color: var(--muted); }
+
+/* Banner atas dashboard: foto perumahan dengan judul */
+.hero-dash {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  padding: 28px 28px;
+  margin-bottom: 20px;
+  color: #fff;
+  background:
+    linear-gradient(120deg, rgba(0,37,71,.88) 0%, rgba(15,59,102,.72) 55%, rgba(62,142,65,.45) 100%),
+    var(--foto-rumah) center 40% / cover no-repeat,
+    var(--navy);
+  box-shadow: 0 4px 16px rgba(15,59,102,.12);
+}
+.hero-dash h1 { color: #fff; margin: 0 0 6px; font-size: 26px; }
+.hero-dash .hero-sub { margin: 0; opacity: .9; font-size: 15px; }
+
+/* Tablet (768–1023px) */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .sidebar { width: 220px; }
+  .konten { padding: 20px; }
+  .grid-kartu { grid-template-columns: repeat(2, 1fr); }
+  .grid-foto { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Ponsel (maks. 767px) */
+@media (max-width: 767px) {
+  .konten { padding: 14px 14px 96px; }
+  h1 { font-size: 22px; line-height: 1.25; }
+  h2 { font-size: 17px; }
+  .kartu { padding: 16px; border-radius: 12px; }
+  .grid-kartu { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .stat strong { font-size: 20px; }
+  .grid-form { grid-template-columns: 1fr; }
+  .grid-foto { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .foto img { height: 130px; }
+  .baris-judul { flex-direction: column; align-items: flex-start; }
+  .inline { width: 100%; }
+  .inline input, .inline select { width: 100%; }
+  .baris-agenda { flex-direction: column; }
+  .hero-dash { padding: 20px 18px; }
+  .hero-dash h1 { font-size: 21px; }
+  .topbar .judul-top strong { font-size: 15px; }
+  .topbar .judul-top small { font-size: 12px; }
+  .kartu-login { margin: 12px auto; padding: 18px; }
+  body.bg-login .kartu-login { margin: 6vh auto; }
+  .btn-utama { min-height: 46px; }
+  input, select, textarea { font-size: 16px; } /* mencegah zoom otomatis di iPhone */
+}
+
+/* Layar sangat kecil (≤360px) */
+@media (max-width: 360px) {
+  .grid-kartu { grid-template-columns: 1fr; }
+  .grid-foto { grid-template-columns: 1fr; }
+  .bottom-nav button, .bottom-nav a { font-size: 11px; }
+}
+
+/* Tabel jadi kartu di ponsel (label kolom diambil otomatis dari header tabel) */
+@media (max-width: 767px) {
+  .tabel-wrap { overflow: visible; }
+  .tabel-wrap table, .tabel-wrap thead, .tabel-wrap tbody, .tabel-wrap tr, .tabel-wrap td { display: block; width: 100%; min-width: 0; }
+  .tabel-wrap thead { display: none; }
+  .tabel-wrap tr { background: #fff; border: 1px solid var(--garis); border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; }
+  .tabel-wrap td { border: none; padding: 5px 0; text-align: left !important; white-space: normal; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .tabel-wrap td::before { content: attr(data-label); font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; flex-shrink: 0; max-width: 45%; }
+  .tabel-wrap td:empty { display: none; }
+  .tabel-wrap td[colspan] { display: block; }
+  .tabel-wrap td[colspan]::before { content: none; }
+  .tabel-wrap tr:has(td[colspan]) { background: transparent; border: none; padding: 0; }
+  .tabel-wrap td .btn-kecil { margin-left: auto; }
+}
