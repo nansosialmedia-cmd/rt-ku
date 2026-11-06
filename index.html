@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>RT-KU · RT02/RW29 Gading Elok 1</title>
+  <link rel="icon" href="assets/logo/Logo_RT02.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app">
+    <aside id="sidebar" class="sidebar" hidden>
+      <div class="brand">
+        <img src="assets/logo/Logo_RT02.png" alt="Logo RT02 RW29">
+        <div><strong>RT-KU</strong><small>RT02 / RW29</small></div>
+      </div>
+      <nav id="menu"></nav>
+      <div class="profil-bawah">
+        <div id="nama-sidebar"></div>
+        <button id="btn-keluar" class="btn-ghost" type="button">Keluar Sistem</button>
+      </div>
+    </aside>
+    <div class="utama">
+      <header id="topbar" class="topbar" hidden>
+        <button id="btn-menu" class="btn-ikon" type="button" aria-label="Buka menu">☰</button>
+        <div class="judul-top">
+          <strong>Sistem Informasi Warga</strong>
+          <small>RT02 / RW29 Gading Elok 1</small>
+        </div>
+        <div id="profil-top" class="profil-top"></div>
+      </header>
+      <main id="view" class="konten"></main>
+      <nav id="bottom-nav" class="bottom-nav" aria-label="Menu utama" hidden></nav>
+    </div>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
