@@ -142,6 +142,7 @@ async function go(p) {
 
   const konten = !!AKUN && !['login', 'pemulihan'].includes(p);
   shell(konten);
+  document.body.classList.toggle('bg-login', ['login', 'pemulihan'].includes(p));
   if (konten) renderMenu(p);
   const v = $('#view');
   v.classList.add('muat');
@@ -239,7 +240,7 @@ async function viewDashboard() {
           + stat('Anggota keluarga', s.jumlahAnggota, 'Anggota aktif');
     if (s.akunAktif !== undefined) kartu += stat('Akun aktif', s.akunAktif, 'Pengguna aktif') + stat('Akun terkunci', s.akunTerkunci, 'Akibat login gagal');
   }
-  $('#view').innerHTML = `<h1>Selamat datang, ${esc(AKUN.nama)}</h1>
+  $('#view').innerHTML = `<section class="hero-dash"><h1>Selamat datang, ${esc(AKUN.nama)}</h1><p class="hero-sub">RT02/RW29 Perumahan Gading Elok 1</p></section>
     <p class="muted">${esc(PERAN[AKUN.peran])}</p>
     <div class="grid-kartu">${kartu}</div>`;
 }
@@ -1388,5 +1389,18 @@ async function init() {
   }
   go('login');
 }
+
+// Label kolom untuk tampilan kartu di ponsel: diambil dari teks header tabel
+function labelTabel() {
+  document.querySelectorAll('#view table').forEach(t => {
+    const heads = [...t.querySelectorAll('thead th')].map(th => th.textContent.trim());
+    if (!heads.length) return;
+    t.querySelectorAll('tbody tr').forEach(tr => {
+      if (tr.children.length === 1) return;
+      [...tr.children].forEach((td, i) => { if (!td.dataset.label && heads[i] !== undefined) td.dataset.label = heads[i]; });
+    });
+  });
+}
+new MutationObserver(labelTabel).observe($('#view'), { childList: true, subtree: true });
 
 init();
