@@ -18,9 +18,17 @@ let RUMAH_AKTIF = null;
 
 function ambilToken() { return localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY) || ''; }
 function simpanToken(t, ingat) { hapusToken(); (ingat ? localStorage : sessionStorage).setItem(TOKEN_KEY, t); }
-function hapusToken() { localStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(TOKEN_KEY); }
+function hapusToken() { localStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(TOKEN_KEY); CACHE.clear(); }
+
+let SIBUK = 0;
+function sibuk(d) {
+  SIBUK = Math.max(0, SIBUK + d);
+  const bar = document.getElementById('bar');
+  if (bar) bar.hidden = SIBUK === 0;
+}
 
 async function api(aksi, data = {}) {
+  sibuk(1);
   try {
     const r = await fetch(GAS_URL, {
       method: 'POST',
@@ -30,16 +38,41 @@ async function api(aksi, data = {}) {
     return await r.json();
   } catch (e) {
     return { success: false, message: 'Tidak dapat terhubung ke server. Periksa koneksi internet.' };
+  } finally {
+    sibuk(-1);
   }
 }
 
+// Data hasil baca disimpan 45 detik agar pindah halaman terasa instan.
+// Setiap aksi tulis menghapus seluruh simpanan. Klik menu yang sedang aktif = muat ulang data.
+const BACA = new Set(['dashboard', 'daftarRumah', 'daftarAnggota', 'daftarAkun', 'daftarPengurus', 'daftarLog',
+  'ringkasanKasUmum', 'daftarTagihan', 'daftarPembayaran', 'ringkasanKas', 'daftarSerahTerima', 'daftarPenyaluran',
+  'daftarSurat', 'daftarPengumuman', 'daftarAgenda', 'daftarGaleri', 'daftarNotulen', 'daftarPengaduan',
+  'ambilJadwalPengingat', 'riwayatPengingat']);
+const CACHE = new Map();
+const CACHE_MS = 45000;
+let NAV_ID = 0;
+
 // Sesi kedaluwarsa otomatis kembali ke login
 async function panggil(aksi, data = {}) {
+  const baca = BACA.has(aksi);
+  const kunci = aksi + '|' + JSON.stringify(data);
+  if (baca) {
+    const c = CACHE.get(kunci);
+    if (c && Date.now() - c.t < CACHE_MS) return c.r;
+  } else {
+    CACHE.clear();
+  }
+  const nav = NAV_ID;
   const r = await api(aksi, data);
+  if (!baca) CACHE.clear();
+  if (baca && r.success) CACHE.set(kunci, { t: Date.now(), r });
   if (!r.success && r.sesi) {
     hapusToken(); AKUN = null;
     toast(r.message, false);
     go('login');
+  } else if (baca && nav !== NAV_ID) {
+    return { success: false, batal: true }; // pengguna sudah pindah halaman: jangan timpa tampilan
   } else if (!r.success) {
     toast(r.message, false);
   }
@@ -61,26 +94,27 @@ function toast(pesan, ok = true) {
 function shell(on) {
   $('#sidebar').hidden = !on;
   $('#topbar').hidden = !on;
-  $('#bottom-nav').hidden = !on;
+  if (!on) tutupMenu();
 }
 
-// Navigasi bawah HP: empat menu utama sesuai peran, plus tombol "Menu" untuk seluruh daftar
-const LABEL_SINGKAT = { dashboard: 'Beranda', rumah: 'Data', kasUmum: 'Kas', kasJimpitan: 'Kas', kasPembangunan: 'Kas', kasSosial: 'Kas', surat: 'Surat', pengumuman: 'Info', pengaduan: 'Aduan', notulen: 'Notulen', agenda: 'Agenda' };
-const PRIORITAS_BAWAH = ['dashboard', 'rumah', 'kasUmum', 'kasJimpitan', 'kasPembangunan', 'kasSosial', 'surat', 'pengumuman', 'pengaduan'];
+// Menu samping di HP: dibuka lewat tombol burger, ditutup lewat latar gelap, tombol Esc, atau saat memilih menu
+function toggleMenu() {
+  const buka = $('#sidebar').classList.toggle('buka');
+  const ov = $('#overlay'); if (ov) ov.hidden = !buka;
+  document.body.classList.toggle('menu-buka', buka);
+  $('#btn-menu').setAttribute('aria-expanded', String(buka));
+}
 
-function renderNavBawah(item, aktif) {
-  const pilih = PRIORITAS_BAWAH
-    .map(k => item.find(([kode]) => kode === k))
-    .filter(Boolean)
-    .filter((x, i, arr) => arr.findIndex(y => LABEL_SINGKAT[y[0]] === LABEL_SINGKAT[x[0]]) === i)
-    .slice(0, 4);
-  $('#bottom-nav').innerHTML = pilih.map(([k]) =>
-    `<a href="#" data-go="${k}" class="${k === aktif ? 'aktif' : ''}">${LABEL_SINGKAT[k]}</a>`).join('')
-    + '<button type="button" id="btn-menu-bawah">Menu</button>';
+function tutupMenu() {
+  $('#sidebar').classList.remove('buka');
+  const ov = $('#overlay'); if (ov) ov.hidden = true;
+  document.body.classList.remove('menu-buka');
+  const b = $('#btn-menu'); if (b) b.setAttribute('aria-expanded', 'false');
 }
 
 function renderMenu(aktif) {
   const item = [['dashboard', 'Dashboard'], ['rumah', AKUN.peran === 'warga' ? 'Data Keluarga Saya' : 'Data Rumah & Anggota']];
+  if (['administrator', 'sekretaris'].includes(AKUN.peran)) item.push(['inputAnggota', 'Input Anggota Keluarga']);
   if (AKUN.peran === 'administrator') {
     item.push(['akun', 'Akun & Hak Akses'], ['pengurus', 'Pengurus & Periode'], ['log', 'Log Aktivitas']);
   }
@@ -102,7 +136,6 @@ function renderMenu(aktif) {
   $('#menu').innerHTML = item.map(([k, l]) => `<a href="#" data-go="${k}" class="${k === aktif ? 'aktif' : ''}">${l}</a>`).join('');
   $('#nama-sidebar').textContent = AKUN.nama;
   $('#profil-top').textContent = `${AKUN.nama} · ${PERAN[AKUN.peran]}`;
-  renderNavBawah(item, aktif);
 }
 
 // ============================================
@@ -113,7 +146,7 @@ const HALAMAN = {
   login: viewLogin, pemulihan: viewPemulihan, dashboard: viewDashboard, rumah: viewRumah,
   akun: viewAkun, pengurus: viewPengurus, log: viewLog, sandi: viewSandi, surat: viewSurat,
   pengumuman: viewPengumuman, agenda: viewAgenda, galeri: viewGaleri, notulen: viewNotulen, pengaduan: viewPengaduan,
-  pengingat: viewPengingat,
+  pengingat: viewPengingat, inputAnggota: () => viewInputAnggota(),
   kasUmum: () => viewKasUmum(), kasPembangunan: () => viewKas('pembangunan'),
   kasJimpitan: () => viewKas('jimpitan'), kasSosial: () => viewKas('sosial')
 };
@@ -130,25 +163,37 @@ function bolehBacaKas(kas) {
 }
 const HALAMAN_ADMIN = ['akun', 'pengurus', 'log'];
 
+let HALAMAN_AKTIF = null;
+const HALAMAN_FORM = ['login', 'pemulihan', 'sandi'];
+
 async function go(p) {
   if (!AKUN && !['login', 'pemulihan', 'pengumuman', 'agenda', 'galeri'].includes(p)) p = 'login';
   if (p === 'notulen' && !PENGURUS_FE.includes(AKUN?.peran)) p = 'dashboard';
   if (p === 'pengingat' && (!FITUR.pengingatWA || !['bendahara_umum', 'ketua_rt', 'administrator'].includes(AKUN?.peran))) p = 'dashboard';
   if (p === 'pengaduan' && !['warga', 'sekretaris', 'ketua_rt'].includes(AKUN?.peran)) p = 'dashboard';
+  if (p === 'inputAnggota' && !['administrator', 'sekretaris'].includes(AKUN?.peran)) p = 'dashboard';
   if (AKUN && AKUN.wajib_ganti_sandi && p !== 'sandi') p = 'sandi';
   if (HALAMAN_ADMIN.includes(p) && AKUN?.peran !== 'administrator') p = 'dashboard';
   if (KAS_DARI_HALAMAN[p] && !bolehBacaKas(KAS_DARI_HALAMAN[p])) p = 'dashboard';
   if (p === 'surat' && !['warga', 'ketua_rt', 'sekretaris'].includes(AKUN?.peran)) p = 'dashboard';
 
+  if (p === HALAMAN_AKTIF && !HALAMAN_FORM.includes(p)) CACHE.clear(); // klik menu yang sama = muat ulang data
+  HALAMAN_AKTIF = p;
+  const nav = ++NAV_ID;
+
   const konten = !!AKUN && !['login', 'pemulihan'].includes(p);
   shell(konten);
   document.body.classList.toggle('bg-login', ['login', 'pemulihan'].includes(p));
   if (konten) renderMenu(p);
+  tutupMenu();
   const v = $('#view');
-  v.classList.add('muat');
+  if (!HALAMAN_FORM.includes(p)) v.innerHTML = '<div class="memuat"><span class="putar"></span> Memuat halaman…</div>';
   try { await HALAMAN[p](); }
-  catch (e) { toast('Terjadi kesalahan pada tampilan.', false); }
-  finally { v.classList.remove('muat'); }
+  catch (e) { console.error(e); toast('Terjadi kesalahan pada tampilan.', false); }
+  if (nav !== NAV_ID) return; // pengguna sudah pindah ke halaman lain
+  if (v.querySelector(':scope > .memuat')) {
+    v.innerHTML = `<div class="kartu"><p>Halaman gagal dimuat. Periksa koneksi internet lalu coba lagi.</p><button class="btn-utama" type="button" data-go="${p}">Coba lagi</button></div>`;
+  }
   window.scrollTo(0, 0);
 }
 
@@ -261,7 +306,7 @@ async function viewRumah() {
     </tr>`).join('');
   $('#view').innerHTML = `
     <h1>${AKUN.peran === 'warga' ? 'Data Keluarga Saya' : 'Data Rumah & Anggota'}</h1>
-    <section class="kartu"><div class="tabel-wrap"><table>
+    <section class="kartu">${AKUN.peran === 'warga' ? '' : '<input id="cari-rumah" type="search" placeholder="Cari blok, nomor, atau nama kepala keluarga…" style="margin-bottom:12px">'}<div class="tabel-wrap"><table id="tabel-rumah">
       <thead><tr><th>Blok</th><th>No.</th><th>Kepala keluarga</th><th>Anggota</th><th></th></tr></thead>
       <tbody>${baris || '<tr><td colspan="5" class="muted">Belum ada data rumah.</td></tr>'}</tbody>
     </table></div></section>
@@ -273,7 +318,7 @@ async function viewRumah() {
         <button class="btn-utama" type="submit">Simpan Rumah</button>
       </form>
     </section>` : ''}
-    <section class="kartu" id="panel-anggota"></section>`;
+    <section class="kartu" id="panel-anggota">${['administrator', 'sekretaris'].includes(AKUN.peran) ? '<p class="muted">Klik “Lihat anggota” pada sebuah rumah untuk melihat anggotanya, atau pakai menu <b>Input Anggota Keluarga</b> untuk menambah anggota.</p>' : ''}</section>`;
   if (AKUN.peran === 'warga' && r.rumah[0]) tampilAnggota(r.rumah[0].id);
 }
 
@@ -289,7 +334,7 @@ async function tampilAnggota(rumahId) {
     <thead><tr><th>Nama</th><th>Tgl lahir</th><th>Usia</th><th>Hubungan</th><th>WhatsApp</th></tr></thead>
     <tbody>${isi}</tbody></table></div>`;
   RUMAH_AKTIF = rumahId;
-  if (AKUN.peran === 'administrator') {
+  if (['administrator', 'sekretaris'].includes(AKUN.peran)) {
     panel.insertAdjacentHTML('beforeend', `
       <form id="form-anggota" class="grid-form" style="margin-top:16px">
         <h2>Tambah anggota</h2>
@@ -1280,6 +1325,52 @@ async function kirimUji(f) {
   toast(r.message, r.success);
 }
 
+// ============================================
+// HALAMAN: INPUT ANGGOTA KELUARGA (ADMINISTRATOR & SEKRETARIS)
+// ============================================
+
+async function viewInputAnggota(rumahId = '') {
+  const rm = await panggil('daftarRumah');
+  if (!rm.success) return;
+  const opsi = rm.rumah.map(x => `<option value="${esc(x.id)}" ${x.id === rumahId ? 'selected' : ''}>Blok ${esc(x.blok)} No. ${esc(x.nomor)}${x.kepala_keluarga ? ' · ' + esc(x.kepala_keluarga) : ''} (${x.jumlahAnggota} anggota)</option>`).join('');
+
+  let bawah = '<p class="muted">Pilih rumah terlebih dahulu untuk melihat dan menambah anggotanya.</p>';
+  if (rumahId) {
+    const a = await panggil('daftarAnggota', { rumah_id: rumahId });
+    if (!a.success) return;
+    const baris = a.anggota.map(x => `<tr><td>${esc(x.nama)}</td><td>${tglIndo(x.tgl_lahir)}</td><td>${x.usia} th</td><td>${esc(x.hubungan)}</td><td class="mono">${esc(x.wa) || '—'}</td></tr>`).join('')
+      || '<tr><td colspan="5" class="muted">Belum ada anggota terdaftar di rumah ini.</td></tr>';
+    bawah = `
+      <section class="kartu"><h2>Anggota saat ini</h2><div class="tabel-wrap"><table>
+        <thead><tr><th>Nama</th><th>Tgl lahir</th><th>Usia</th><th>Hubungan</th><th>WhatsApp</th></tr></thead>
+        <tbody>${baris}</tbody></table></div></section>
+      <section class="kartu"><h2>2. Tambah anggota</h2>
+        <form id="form-input-anggota" class="grid-form">
+          <input type="hidden" name="rumah_id" value="${esc(rumahId)}">
+          <label>Nama lengkap<input name="nama" required maxlength="100" autocomplete="off"></label>
+          <label>Hubungan keluarga<select name="hubungan" required>
+            <option value="">Pilih</option><option>Kepala Keluarga</option><option>Istri</option>
+            <option>Suami</option><option>Anak</option><option>Orang Tua</option><option>Anggota Lain</option>
+          </select></label>
+          <label>Tanggal lahir<input name="tgl_lahir" type="date" required></label>
+          <label>No. WhatsApp (opsional)<input name="wa" inputmode="tel" placeholder="0812xxxxxxx"></label>
+          <p class="muted">Nomor WhatsApp akan dipakai untuk pengingat tagihan. Isi nomor kepala keluarga bila ada. Setiap rumah hanya boleh punya satu kepala keluarga.</p>
+          <button class="btn-utama" type="submit">Simpan Anggota</button>
+        </form></section>`;
+  }
+  $('#view').innerHTML = `<h1>Input Anggota Keluarga</h1>
+    <section class="kartu"><h2>1. Pilih rumah</h2>
+      <label>Rumah<select id="pilih-rumah-anggota"><option value="">— Pilih rumah —</option>${opsi}</select></label>
+    </section>${bawah}`;
+}
+
+async function kirimInputAnggota(f) {
+  const data = Object.fromEntries(new FormData(f));
+  const r = await panggil('tambahAnggota', data);
+  toast(r.message, r.success);
+  if (r.success) viewInputAnggota(data.rumah_id);
+}
+
 async function kirimAkun(f) {
   const r = await panggil('buatAkun', Object.fromEntries(new FormData(f)));
   toast(r.message, r.success);
@@ -1326,7 +1417,10 @@ async function keluar() {
 // ============================================
 
 document.addEventListener('click', (e) => {
-  const el = e.target.closest('[data-go],[data-tab],[data-anggota],[data-aksi],[data-verif],[data-laporan],[data-konfirmasi],[data-surat],[data-edit-peng],[data-reset-form],[data-batal-agenda],[data-lampiran],[data-tanggapi],[data-pratinjau],[data-kirim-pengingat],[data-mata],#btn-keluar,#btn-menu,#btn-menu-bawah');
+  if ($('#sidebar').classList.contains('buka') && !e.target.closest('#sidebar') && !e.target.closest('#btn-menu')) {
+    tutupMenu();
+  }
+  const el = e.target.closest('[data-go],[data-tab],[data-anggota],[data-aksi],[data-verif],[data-laporan],[data-konfirmasi],[data-surat],[data-edit-peng],[data-reset-form],[data-batal-agenda],[data-lampiran],[data-tanggapi],[data-pratinjau],[data-kirim-pengingat],[data-mata],#btn-keluar,#btn-menu');
   if (!el) return;
   e.preventDefault();
   if (el.dataset.go) go(el.dataset.go);
@@ -1349,7 +1443,7 @@ document.addEventListener('click', (e) => {
   else if (el.hasAttribute('data-pratinjau')) lihatPratinjau();
   else if (el.hasAttribute('data-kirim-pengingat')) kirimPengingatSekarang();
   else if (el.id === 'btn-keluar') keluar();
-  else if (el.id === 'btn-menu' || el.id === 'btn-menu-bawah') $('#sidebar').classList.toggle('buka');
+  else if (el.id === 'btn-menu') toggleMenu();
 });
 
 document.addEventListener('submit', async (e) => {
@@ -1365,7 +1459,7 @@ document.addEventListener('submit', async (e) => {
     'form-ajukan': kirimAjukan, 'form-perbaiki': kirimPerbaiki, 'form-tinjau': kirimTinjau,
     'form-pengumuman': kirimPengumuman, 'form-agenda': kirimAgenda, 'form-galeri': kirimGaleri,
     'form-notulen': kirimNotulen, 'form-pengaduan': kirimPengaduan, 'form-tanggapi': kirimTanggapi,
-    'form-jadwal': kirimJadwal, 'form-uji': kirimUji
+    'form-jadwal': kirimJadwal, 'form-uji': kirimUji, 'form-input-anggota': kirimInputAnggota
   }[f.id];
   if (!handler) return;
   const tombol = f.querySelector('[type=submit]');
@@ -1401,6 +1495,15 @@ function labelTabel() {
     });
   });
 }
-new MutationObserver(labelTabel).observe($('#view'), { childList: true, subtree: true });
+let _lbl = 0;
+new MutationObserver(() => { cancelAnimationFrame(_lbl); _lbl = requestAnimationFrame(labelTabel); }).observe($('#view'), { childList: true, subtree: true });
+
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'cari-rumah') return;
+  const q = e.target.value.trim().toLowerCase();
+  document.querySelectorAll('#tabel-rumah tbody tr').forEach(tr => { tr.hidden = !!q && !tr.textContent.toLowerCase().includes(q); });
+});
+document.addEventListener('change', (e) => { if (e.target.id === 'pilih-rumah-anggota') viewInputAnggota(e.target.value); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') tutupMenu(); });
 
 init();

@@ -7,9 +7,10 @@
   <link rel="icon" href="assets/logo/Logo_RT02.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=4">
 </head>
 <body>
+  <div id="bar" class="bar" hidden></div>
   <div class="app">
     <aside id="sidebar" class="sidebar" hidden>
       <div class="brand">
@@ -24,7 +25,7 @@
     </aside>
     <div class="utama">
       <header id="topbar" class="topbar" hidden>
-        <button id="btn-menu" class="btn-ikon" type="button" aria-label="Buka menu">☰</button>
+        <button id="btn-menu" class="btn-ikon" type="button" aria-label="Buka menu" aria-controls="sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
         <div class="judul-top">
           <strong>Sistem Informasi Warga</strong>
           <small>RT02 / RW29 Gading Elok 1</small>
@@ -32,12 +33,12 @@
         <div id="profil-top" class="profil-top"></div>
       </header>
       <main id="view" class="konten"></main>
-      <nav id="bottom-nav" class="bottom-nav" aria-label="Menu utama" hidden></nav>
     </div>
   </div>
+  <div id="overlay" class="overlay" hidden></div>
   <div id="toast" class="toast" role="status"></div>
 
-  <script src="js/config.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/config.js?v=4"></script>
+  <script src="js/app.js?v=4"></script>
 </body>
 </html>

@@ -138,7 +138,6 @@ textarea:focus { outline: none; border-color: var(--navy); box-shadow: 0 0 0 3px
    Foto: assets/perumahan.jpg (landscape, min. 1600px).
    Jika foto belum ada, latar tetap tampil dengan warna navy.
    ============================================ */
-:root { --foto-rumah: url('../assets/perumahan.jpg'); }
 
 html, body { overflow-x: hidden; }
 
@@ -147,7 +146,7 @@ body.bg-login {
   min-height: 100vh;
   background:
     linear-gradient(160deg, rgba(0,37,71,.78) 0%, rgba(15,59,102,.62) 60%, rgba(62,142,65,.35) 100%),
-    var(--foto-rumah) center / cover no-repeat fixed,
+    url('../assets/perumahan.jpg?v=4') center / cover no-repeat,
     var(--navy-d);
 }
 body.bg-login .kartu-login { margin: 8vh auto; }
@@ -166,7 +165,7 @@ body.bg-login .kartu-login .tengah.muted { color: var(--muted); }
   color: #fff;
   background:
     linear-gradient(120deg, rgba(0,37,71,.88) 0%, rgba(15,59,102,.72) 55%, rgba(62,142,65,.45) 100%),
-    var(--foto-rumah) center 40% / cover no-repeat,
+    url('../assets/perumahan.jpg?v=4') center 40% / cover no-repeat,
     var(--navy);
   box-shadow: 0 4px 16px rgba(15,59,102,.12);
 }
@@ -226,4 +225,34 @@ body.bg-login .kartu-login .tengah.muted { color: var(--muted); }
   .tabel-wrap td[colspan]::before { content: none; }
   .tabel-wrap tr:has(td[colspan]) { background: transparent; border: none; padding: 0; }
   .tabel-wrap td .btn-kecil { margin-left: auto; }
+}
+
+/* Menu: burger di atas (HP). Menu bawah dinonaktifkan atas permintaan. */
+.bottom-nav { display: none !important; }
+@media (max-width: 767px) {
+  .konten { padding-bottom: 16px; }
+  .btn-ikon { display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px; padding: 0; border: 1px solid var(--garis); border-radius: 10px; background: #fff; color: var(--navy); cursor: pointer; flex-shrink: 0; }
+  .btn-ikon svg { width: 22px; height: 22px; }
+  .sidebar { box-shadow: none; transition: left .22s ease; }
+  .sidebar.buka { left: 0; box-shadow: 4px 0 18px rgba(0,0,0,.25); }
+}
+
+/* Indikator memuat saat pindah halaman */
+.memuat { display: flex; align-items: center; gap: 10px; justify-content: center; color: var(--muted); padding: 60px 0; font-size: 15px; }
+.putar { width: 18px; height: 18px; border: 2px solid var(--garis); border-top-color: var(--navy); border-radius: 50%; animation: putar .7s linear infinite; }
+@keyframes putar { to { transform: rotate(360deg); } }
+
+
+/* ===== rev. 4: indikator permintaan, menu burger dengan latar gelap ===== */
+.bar { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 100; background: linear-gradient(90deg, var(--hijau), var(--navy), var(--hijau)); background-size: 200% 100%; animation: bar-jalan 1s linear infinite; }
+@keyframes bar-jalan { from { background-position: 200% 0; } to { background-position: 0 0; } }
+.overlay { display: none; }
+.sidebar { overflow-y: auto; }
+@media (max-width: 767px) {
+  .overlay:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 19; background: rgba(0, 37, 71, .5); }
+  .sidebar { top: 0; bottom: 0; height: auto; width: 280px; left: -300px; }
+  .sidebar.buka { left: 0; }
+  body.menu-buka { overflow: hidden; }
+  .sidebar nav a { padding: 13px 12px; font-size: 16px; }
+  .btn-ghost { min-height: 44px; }
 }
