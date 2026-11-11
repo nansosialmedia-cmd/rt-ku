@@ -3,11 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0F3B66">
   <title>RT-KU · RT02/RW29 Gading Elok 1</title>
   <link rel="icon" href="assets/logo/Logo_RT02.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://script.google.com">
+  <link rel="preconnect" href="https://script.googleusercontent.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=4">
+  <link rel="stylesheet" href="css/style.css?v=5">
 </head>
 <body>
   <div id="bar" class="bar" hidden></div>
@@ -16,18 +19,19 @@
       <div class="brand">
         <img src="assets/logo/Logo_RT02.png" alt="Logo RT02 RW29">
         <div><strong>RT-KU</strong><small>RT02 / RW29</small></div>
+        <button id="btn-tutup-menu" class="btn-tutup" type="button" aria-label="Tutup menu">&times;</button>
       </div>
-      <nav id="menu"></nav>
+      <div id="kartu-user" class="kartu-user"></div>
+      <nav id="menu" aria-label="Menu utama"></nav>
       <div class="profil-bawah">
-        <div id="nama-sidebar"></div>
-        <button id="btn-keluar" class="btn-ghost" type="button">Keluar Sistem</button>
+        <button id="btn-keluar" class="btn-keluar" type="button">Keluar</button>
       </div>
     </aside>
     <div class="utama">
       <header id="topbar" class="topbar" hidden>
         <button id="btn-menu" class="btn-ikon" type="button" aria-label="Buka menu" aria-controls="sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
         <div class="judul-top">
-          <strong>Sistem Informasi Warga</strong>
+          <strong id="judul-halaman">Beranda</strong>
           <small>RT02 / RW29 Gading Elok 1</small>
         </div>
         <div id="profil-top" class="profil-top"></div>
@@ -38,7 +42,7 @@
   <div id="overlay" class="overlay" hidden></div>
   <div id="toast" class="toast" role="status"></div>
 
-  <script src="js/config.js?v=4"></script>
-  <script src="js/app.js?v=4"></script>
+  <script src="js/config.js?v=5"></script>
+  <script src="js/app.js?v=5"></script>
 </body>
 </html>

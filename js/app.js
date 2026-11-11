@@ -18,7 +18,7 @@ let RUMAH_AKTIF = null;
 
 function ambilToken() { return localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY) || ''; }
 function simpanToken(t, ingat) { hapusToken(); (ingat ? localStorage : sessionStorage).setItem(TOKEN_KEY, t); }
-function hapusToken() { localStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(TOKEN_KEY); CACHE.clear(); }
+function hapusToken() { localStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(TOKEN_KEY); kosongkanCache(); PREFETCH_OK = false; }
 
 let SIBUK = 0;
 function sibuk(d) {
@@ -43,15 +43,24 @@ async function api(aksi, data = {}) {
   }
 }
 
-// Data hasil baca disimpan 45 detik agar pindah halaman terasa instan.
-// Setiap aksi tulis menghapus seluruh simpanan. Klik menu yang sedang aktif = muat ulang data.
+// Data hasil baca disimpan agar pindah halaman terasa instan:
+//  - umur < 20 dtk : dipakai langsung
+//  - umur < 10 mnt : ditampilkan langsung, lalu disegarkan di belakang layar (tampilan diperbarui bila datanya berubah)
+// Setiap aksi tulis mengosongkan seluruh simpanan. Klik menu yang sedang aktif = muat ulang data.
 const BACA = new Set(['dashboard', 'daftarRumah', 'daftarAnggota', 'daftarAkun', 'daftarPengurus', 'daftarLog',
   'ringkasanKasUmum', 'daftarTagihan', 'daftarPembayaran', 'ringkasanKas', 'daftarSerahTerima', 'daftarPenyaluran',
   'daftarSurat', 'daftarPengumuman', 'daftarAgenda', 'daftarGaleri', 'daftarNotulen', 'daftarPengaduan',
-  'ambilJadwalPengingat', 'riwayatPengingat']);
+  'ambilJadwalPengingat', 'riwayatPengingat', 'ringkasanKeuangan']);
 const CACHE = new Map();
-const CACHE_MS = 45000;
+const SEGAR_MS = 20000;
+const BASI_MS = 600000;
+let EPOCH = 0;          // naik setiap simpanan dikosongkan: hasil yang datang terlambat dibuang
 let NAV_ID = 0;
+let DAFTAR_BASI = [];
+let FORM_KOTOR = false; // pengguna sedang mengisi sesuatu: jangan timpa tampilan
+let PREFETCH_OK = false;
+
+function kosongkanCache() { CACHE.clear(); EPOCH++; }
 
 // Sesi kedaluwarsa otomatis kembali ke login
 async function panggil(aksi, data = {}) {
@@ -59,14 +68,18 @@ async function panggil(aksi, data = {}) {
   const kunci = aksi + '|' + JSON.stringify(data);
   if (baca) {
     const c = CACHE.get(kunci);
-    if (c && Date.now() - c.t < CACHE_MS) return c.r;
+    if (c) {
+      const umur = Date.now() - c.t;
+      if (umur < SEGAR_MS) return c.r;
+      if (umur < BASI_MS) { DAFTAR_BASI.push({ aksi, data, kunci }); return c.r; }
+    }
   } else {
-    CACHE.clear();
+    kosongkanCache();
   }
-  const nav = NAV_ID;
+  const nav = NAV_ID, epoch = EPOCH;
   const r = await api(aksi, data);
-  if (!baca) CACHE.clear();
-  if (baca && r.success) CACHE.set(kunci, { t: Date.now(), r });
+  if (!baca) kosongkanCache();
+  if (baca && r.success && epoch === EPOCH) CACHE.set(kunci, { t: Date.now(), r, json: JSON.stringify(r) });
   if (!r.success && r.sesi) {
     hapusToken(); AKUN = null;
     toast(r.message, false);
@@ -77,6 +90,67 @@ async function panggil(aksi, data = {}) {
     toast(r.message, false);
   }
   return r;
+}
+
+function sedangMengisi() {
+  const el = document.activeElement;
+  return FORM_KOTOR || !!(el && $('#view').contains(el) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName));
+}
+
+// Menyegarkan data yang tadi ditampilkan dari simpanan lama; menggambar ulang halaman hanya bila ada yang berubah.
+async function segarkanBasi(nav, p, daftar) {
+  const epoch = EPOCH;
+  const unik = [...new Map(daftar.map(x => [x.kunci, x])).values()];
+  const hasil = await Promise.all(unik.map(x => api(x.aksi, x.data)));
+  if (epoch !== EPOCH) return;
+  let berubah = false;
+  hasil.forEach((r, i) => {
+    if (!r.success) return;
+    const json = JSON.stringify(r), lama = CACHE.get(unik[i].kunci);
+    if (!lama || lama.json !== json) berubah = true;
+    CACHE.set(unik[i].kunci, { t: Date.now(), r, json });
+  });
+  if (berubah && nav === NAV_ID && !sedangMengisi()) {
+    try { await HALAMAN[p](); } catch (e) { console.error(e); }
+  }
+}
+
+// Setelah halaman pertama tampil, data halaman-halaman lain diambil sekaligus dalam satu permintaan.
+function daftarPrefetch() {
+  const p = AKUN.peran, L = [];
+  const t = (action, data = {}) => L.push({ action, data });
+  t('daftarRumah');
+  if (p === 'warga' && AKUN.rumah_id) t('daftarAnggota', { rumah_id: AKUN.rumah_id });
+  if (p !== 'administrator') t('ringkasanKeuangan', { periode: periodeSekarang() });
+  t('daftarPengumuman', { kelola: ['sekretaris', 'ketua_rt'].includes(p) });
+  t('daftarAgenda'); t('daftarGaleri');
+  ['umum', 'pembangunan', 'jimpitan', 'sosial'].forEach(k => {
+    if (!bolehBacaKas(k)) return;
+    if (k === 'umum') { t('ringkasanKasUmum'); t('daftarTagihan', { periode: periodeSekarang() }); t('daftarPembayaran'); }
+    else {
+      t('ringkasanKas', { kas: k }); t('daftarSerahTerima');
+      if (k === 'sosial' && (p === 'bendahara_sosial' || p === 'ketua_rt')) t('daftarPenyaluran');
+    }
+  });
+  if (['warga', 'ketua_rt', 'sekretaris'].includes(p)) { t('daftarSurat'); t('daftarPengaduan'); }
+  if (PENGURUS_FE.includes(p)) t('daftarNotulen');
+  if (p === 'administrator') { t('daftarAkun'); t('daftarPengurus'); t('daftarLog'); }
+  return L;
+}
+
+async function prefetchSemua() {
+  if (!AKUN) return;
+  const L = daftarPrefetch().filter(x => {
+    const c = CACHE.get(x.action + '|' + JSON.stringify(x.data));
+    return !c || Date.now() - c.t > SEGAR_MS;
+  });
+  if (!L.length) return;
+  const epoch = EPOCH, token = ambilToken();
+  const r = await api('batch', { calls: L });
+  if (!r.success || epoch !== EPOCH || token !== ambilToken()) return;
+  r.hasil.forEach((h, i) => {
+    if (h && h.success) CACHE.set(L[i].action + '|' + JSON.stringify(L[i].data), { t: Date.now(), r: h, json: JSON.stringify(h) });
+  });
 }
 
 // ============================================
@@ -112,30 +186,60 @@ function tutupMenu() {
   const b = $('#btn-menu'); if (b) b.setAttribute('aria-expanded', 'false');
 }
 
-function renderMenu(aktif) {
-  const item = [['dashboard', 'Dashboard'], ['rumah', AKUN.peran === 'warga' ? 'Data Keluarga Saya' : 'Data Rumah & Anggota']];
-  if (['administrator', 'sekretaris'].includes(AKUN.peran)) item.push(['inputAnggota', 'Input Anggota Keluarga']);
-  if (AKUN.peran === 'administrator') {
-    item.push(['akun', 'Akun & Hak Akses'], ['pengurus', 'Pengurus & Periode'], ['log', 'Log Aktivitas']);
-  }
+const IKON = {
+  dashboard: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
+  rumah: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.4"/><path d="M17 14c2.5 0 4.2 1.8 4.2 4.5"/>',
+  inputAnggota: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M19 8v6M16 11h6"/>',
+  kas: '<rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18"/><circle cx="16.5" cy="14.5" r="1.2"/>',
+  surat: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/>',
+  pengaduan: '<path d="M4 5h16v11H9l-5 4z"/>',
+  pengingat: '<path d="M6 16v-5a6 6 0 0112 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 004 0"/>',
+  pengumuman: '<path d="M4 10v4h3l7 4V6L7 10z"/><path d="M18 9c1.2.8 1.2 5.2 0 6"/>',
+  agenda: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  galeri: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M4 18l5-5 4 4 3-3 4 4"/>',
+  notulen: '<path d="M6 3h11a2 2 0 012 2v16H8a2 2 0 01-2-2z"/><path d="M6 17h13M10 8h6"/>',
+  akun: '<path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+  pengurus: '<circle cx="12" cy="8" r="4"/><path d="M5 21c0-3.9 3.1-7 7-7s7 3.1 7 7"/>',
+  log: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  sandi: '<rect x="5" y="11" width="14" height="9.5" rx="2.5"/><path d="M8 11V8a4 4 0 018 0v3"/>'
+};
+const svgIkon = (k) => `<svg class="ikon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IKON[k.startsWith('kas') ? 'kas' : k] || IKON.dashboard}</svg>`;
+const inisial = (n) => String(n || '').trim().split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase() || '?';
+
+// Daftar menu per peran: [kode halaman, nama, kelompok]
+function daftarMenu() {
+  const p = AKUN.peran;
+  const m = [['dashboard', 'Beranda', 'Utama']];
+  m.push(['rumah', p === 'warga' ? 'Data Keluarga Saya' : 'Data Rumah & Anggota', 'Data Warga']);
+  if (['administrator', 'sekretaris'].includes(p)) m.push(['inputAnggota', 'Input Anggota Keluarga', 'Data Warga']);
   ['umum', 'pembangunan', 'jimpitan', 'sosial'].forEach(k => {
-    if (bolehBacaKas(k)) item.push([KAS_HALAMAN[k], NAMA_KAS_FE[k]]);
+    if (bolehBacaKas(k)) m.push([KAS_HALAMAN[k], NAMA_KAS_FE[k], 'Keuangan']);
   });
-  if (['warga', 'ketua_rt', 'sekretaris'].includes(AKUN.peran)) {
-    item.push(['surat', AKUN.peran === 'warga' ? 'Pengajuan Surat' : AKUN.peran === 'ketua_rt' ? 'Review Surat' : 'Status Surat']);
+  if (['warga', 'ketua_rt', 'sekretaris'].includes(p)) {
+    m.push(['surat', p === 'warga' ? 'Pengajuan Surat' : p === 'ketua_rt' ? 'Review Surat' : 'Status Surat', 'Layanan']);
+    m.push(['pengaduan', p === 'warga' ? 'Pengaduan Saya' : 'Pengaduan Warga', 'Layanan']);
   }
-  item.push(['pengumuman', 'Pengumuman'], ['agenda', 'Agenda'], ['galeri', 'Galeri']);
-  if (PENGURUS_FE.includes(AKUN.peran)) item.push(['notulen', 'Notulen']);
-  if (['warga', 'sekretaris', 'ketua_rt'].includes(AKUN.peran)) {
-    item.push(['pengaduan', AKUN.peran === 'warga' ? 'Pengaduan Saya' : 'Pengaduan Warga']);
-  }
-  if (FITUR.pengingatWA && ['bendahara_umum', 'ketua_rt', 'administrator'].includes(AKUN.peran)) {
-    item.push(['pengingat', 'Pengingat WhatsApp']);
-  }
-  item.push(['sandi', 'Ganti Kata Sandi']);
-  $('#menu').innerHTML = item.map(([k, l]) => `<a href="#" data-go="${k}" class="${k === aktif ? 'aktif' : ''}">${l}</a>`).join('');
-  $('#nama-sidebar').textContent = AKUN.nama;
-  $('#profil-top').textContent = `${AKUN.nama} · ${PERAN[AKUN.peran]}`;
+  if (FITUR.pengingatWA && ['bendahara_umum', 'ketua_rt', 'administrator'].includes(p)) m.push(['pengingat', 'Pengingat WhatsApp', 'Layanan']);
+  m.push(['pengumuman', 'Pengumuman', 'Informasi'], ['agenda', 'Agenda', 'Informasi'], ['galeri', 'Galeri', 'Informasi']);
+  if (PENGURUS_FE.includes(p)) m.push(['notulen', 'Notulen Rapat', 'Informasi']);
+  if (p === 'administrator') m.push(['akun', 'Akun & Hak Akses', 'Administrasi'], ['pengurus', 'Pengurus & Periode', 'Administrasi'], ['log', 'Log Aktivitas', 'Administrasi']);
+  m.push(['sandi', 'Ganti Kata Sandi', 'Akun']);
+  return m;
+}
+
+function renderMenu(aktif) {
+  const m = daftarMenu();
+  let grup = '', html = '';
+  m.forEach(([k, l, g]) => {
+    if (g !== grup) { grup = g; html += `<div class="grup-menu">${g}</div>`; }
+    html += `<a href="#" data-go="${k}" class="${k === aktif ? 'aktif' : ''}">${svgIkon(k)}<span>${l}</span></a>`;
+  });
+  $('#menu').innerHTML = html;
+  const nama = AKUN.nama || '';
+  $('#kartu-user').innerHTML = `<span class="avatar">${esc(inisial(nama))}</span><span class="user-teks"><strong>${esc(nama)}</strong><small>${esc(PERAN[AKUN.peran])}</small></span>`;
+  $('#profil-top').innerHTML = `<span class="avatar kecil">${esc(inisial(nama))}</span><span class="profil-teks"><strong>${esc(nama)}</strong><small>${esc(PERAN[AKUN.peran])}</small></span>`;
+  const cur = m.find(x => x[0] === aktif);
+  $('#judul-halaman').textContent = cur ? cur[1] : 'RT-KU';
 }
 
 // ============================================
@@ -177,9 +281,10 @@ async function go(p) {
   if (KAS_DARI_HALAMAN[p] && !bolehBacaKas(KAS_DARI_HALAMAN[p])) p = 'dashboard';
   if (p === 'surat' && !['warga', 'ketua_rt', 'sekretaris'].includes(AKUN?.peran)) p = 'dashboard';
 
-  if (p === HALAMAN_AKTIF && !HALAMAN_FORM.includes(p)) CACHE.clear(); // klik menu yang sama = muat ulang data
+  if (p === HALAMAN_AKTIF && !HALAMAN_FORM.includes(p)) kosongkanCache(); // klik menu yang sama = muat ulang data
   HALAMAN_AKTIF = p;
   const nav = ++NAV_ID;
+  DAFTAR_BASI = []; FORM_KOTOR = false;
 
   const konten = !!AKUN && !['login', 'pemulihan'].includes(p);
   shell(konten);
@@ -195,6 +300,8 @@ async function go(p) {
     v.innerHTML = `<div class="kartu"><p>Halaman gagal dimuat. Periksa koneksi internet lalu coba lagi.</p><button class="btn-utama" type="button" data-go="${p}">Coba lagi</button></div>`;
   }
   window.scrollTo(0, 0);
+  if (DAFTAR_BASI.length) segarkanBasi(nav, p, DAFTAR_BASI.splice(0));
+  if (p === 'dashboard' && AKUN && !PREFETCH_OK) { PREFETCH_OK = true; setTimeout(prefetchSemua, 300); }
 }
 
 // ============================================
@@ -203,19 +310,17 @@ async function go(p) {
 
 function viewLogin(mode = 'pengurus') {
   shell(false);
-  const opsi = Object.entries(PERAN).filter(([k]) => k !== 'administrator')
-    .map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
   $('#view').innerHTML = `
     <div class="kartu-login">
       <img src="assets/logo/Logo_RT02.png" alt="Logo RT02 RW29 Gading Elok 1" class="logo-login">
       <h1>Masuk ke RT-KU</h1>
       <p class="muted">Sistem Informasi & Administrasi Warga RT02/RW29</p>
+      ${mode === 'pengurus' ? '<p class="muted kecil">Cukup masukkan username dan kata sandi. Anda otomatis masuk sesuai peran akun, sebagai warga maupun pengurus.</p>' : ''}
       <div class="tab-dua">
         <button type="button" data-tab="pengurus" class="${mode === 'pengurus' ? 'aktif' : ''}">Pengurus & Warga</button>
         <button type="button" data-tab="admin" class="${mode === 'admin' ? 'aktif' : ''}">Administrator</button>
       </div>
       <form id="form-login" data-mode="${mode}">
-        ${mode === 'pengurus' ? `<label>Pilih peran<select name="peran" required>${opsi}</select></label>` : ''}
         <label>${mode === 'pengurus' ? 'Username atau nomor WhatsApp' : 'Username Administrator'}
           <input name="username" required autocomplete="username"></label>
         <label>Kata sandi
@@ -236,7 +341,6 @@ async function kirimLogin(f) {
   const fd = new FormData(f);
   const mode = f.dataset.mode;
   const data = { username: fd.get('username'), sandi: fd.get('sandi') };
-  if (mode === 'pengurus') data.peran = fd.get('peran');
   const pesan = $('#pesan-login');
   const r = await api(mode === 'admin' ? 'loginAdmin' : 'login', data);
   if (!r.success) { pesan.textContent = r.message; pesan.hidden = false; return; }
@@ -271,8 +375,106 @@ async function kirimPemulihan(f) {
 // HALAMAN: DASHBOARD
 // ============================================
 
-async function viewDashboard() {
-  const r = await panggil('dashboard');
+const PRIORITAS_TILE = ['surat', 'inputAnggota', 'rumah', 'kasUmum', 'pengumuman', 'pengaduan', 'agenda', 'kasJimpitan', 'kasPembangunan', 'kasSosial', 'galeri', 'notulen', 'akun', 'pengurus', 'log'];
+
+function tileMenu() {
+  const m = daftarMenu();
+  const pilih = PRIORITAS_TILE.map(k => m.find(x => x[0] === k)).filter(Boolean).slice(0, 8);
+  return `<div class="tile-grid">${pilih.map(([k, l]) => `<a href="#" class="tile" data-go="${k}">${svgIkon(k)}<span>${l}</span></a>`).join('')}</div>`;
+}
+
+// ---------- grafik (SVG, tanpa pustaka tambahan) ----------
+function skalaAtas(n) {
+  if (n <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(n))), f = n / p;
+  return ([1, 1.5, 2, 3, 4, 5, 6, 8, 10].find(x => f <= x)) * p;
+}
+function singkat(n) {
+  const a = Math.abs(n), t = n < 0 ? '−' : '';
+  if (a >= 1e6) return t + (a / 1e6).toFixed(a % 1e6 ? 1 : 0).replace('.', ',') + ' jt';
+  if (a >= 1e3) return t + Math.round(a / 1e3) + ' rb';
+  return t + a;
+}
+const blnPendek = (ym) => BULAN_FE[Number(ym.slice(5)) - 1];
+
+function grafikBatang(seri) {
+  if (!seri.some(s => s.pemasukan || s.pengeluaran)) return '<p class="muted">Belum ada transaksi pada 6 bulan terakhir.</p>';
+  const W = 340, H = 190, L = 44, R = 6, T = 10, B = 26;
+  const maks = skalaAtas(Math.max(...seri.flatMap(s => [s.pemasukan, s.pengeluaran])));
+  const lg = (W - L - R) / seri.length, lb = Math.min(14, lg * 0.32);
+  const y = (v) => T + (H - T - B) * (1 - v / maks);
+  let g = '';
+  [0, 0.5, 1].forEach(f => {
+    const v = maks * f, yy = y(v);
+    g += `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" class="grid"/><text x="${L - 6}" y="${yy + 4}" text-anchor="end" class="sb">${singkat(v)}</text>`;
+  });
+  seri.forEach((s, i) => {
+    const x0 = L + i * lg + lg / 2;
+    const bar = (v, dx, kelas) => v > 0 ? `<rect x="${(x0 + dx).toFixed(1)}" y="${y(v).toFixed(1)}" width="${lb}" height="${Math.max(1, y(0) - y(v)).toFixed(1)}" rx="3" class="${kelas}"/>` : '';
+    g += bar(s.pemasukan, -lb - 1, 'bar-masuk') + bar(s.pengeluaran, 1, 'bar-keluar');
+    g += `<text x="${x0.toFixed(1)}" y="${H - 8}" text-anchor="middle" class="sb">${blnPendek(s.bulan)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" class="grafik" role="img" aria-label="Grafik batang pemasukan dan pengeluaran enam bulan terakhir">${g}</svg>
+    <div class="legenda"><span><i class="kotak masuk"></i>Pemasukan</span><span><i class="kotak keluar"></i>Pengeluaran</span></div>`;
+}
+
+function grafikGaris(seri) {
+  const W = 340, H = 190, L = 48, R = 14, T = 16, B = 26;
+  const nilai = seri.map(s => s.saldoAkhir);
+  const terkecil = Math.min(0, ...nilai);
+  const lo = terkecil < 0 ? -skalaAtas(-terkecil) : 0;
+  const hi = skalaAtas(Math.max(1, ...nilai));
+  const x = (i) => L + (W - L - R) * (seri.length === 1 ? 0.5 : i / (seri.length - 1));
+  const y = (v) => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+  let g = '';
+  [lo, (lo + hi) / 2, hi].forEach(v => {
+    g += `<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="grid"/><text x="${L - 6}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end" class="sb">${singkat(Math.round(v))}</text>`;
+  });
+  g += `<polyline points="${seri.map((s, i) => `${x(i).toFixed(1)},${y(s.saldoAkhir).toFixed(1)}`).join(' ')}" class="garis"/>`;
+  seri.forEach((s, i) => {
+    g += `<circle cx="${x(i).toFixed(1)}" cy="${y(s.saldoAkhir).toFixed(1)}" r="3.6" class="titik"/><text x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" class="sb">${blnPendek(s.bulan)}</text>`;
+  });
+  const akhir = seri[seri.length - 1];
+  g += `<text x="${x(seri.length - 1).toFixed(1)}" y="${(y(akhir.saldoAkhir) - 9).toFixed(1)}" text-anchor="end" class="sb tebal">${singkat(akhir.saldoAkhir)}</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" class="grafik" role="img" aria-label="Grafik garis saldo akhir enam bulan terakhir">${g}</svg>`;
+}
+
+function bagianKeuangan(k) {
+  if (!k || !k.success) return '';
+  const t = k.total;
+  const baris = k.kas.map(x => `<tr><td>${esc(x.nama)}</td><td class="angka">${rp(x.saldoAwal)}</td><td class="angka">${rp(x.pemasukan)}</td><td class="angka">${rp(x.pengeluaran)}</td><td class="angka"><b>${rp(x.saldoAkhir)}</b></td></tr>`).join('');
+  return `
+    <section class="kartu">
+      <div class="baris-judul"><h2>Laporan Keuangan RT02</h2>
+        <form id="form-periode-dash" class="inline"><input type="month" name="periode" value="${esc(k.periode)}" required><button class="btn-kecil" type="submit">Tampilkan</button></form>
+      </div>
+      <div class="grid-kartu grid-empat">
+        ${stat('Saldo awal', rp(t.saldoAwal), 'Awal bulan')}
+        ${stat('Total pemasukan', rp(t.pemasukan), 'Selama bulan ini')}
+        ${stat('Total pengeluaran', rp(t.pengeluaran), 'Selama bulan ini')}
+        ${stat('Saldo akhir', rp(t.saldoAkhir), 'Akhir bulan')}
+      </div>
+      <div class="grid-grafik">
+        <div><h3>Pemasukan & pengeluaran (6 bulan)</h3>${grafikBatang(k.seri)}</div>
+        <div><h3>Saldo akhir per bulan</h3>${grafikGaris(k.seri)}</div>
+      </div>
+      <h3>Rincian per kas</h3>
+      <div class="tabel-wrap"><table>
+        <thead><tr><th>Kas</th><th>Saldo awal</th><th>Pemasukan</th><th>Pengeluaran</th><th>Saldo akhir</th></tr></thead>
+        <tbody>${baris}
+          <tr class="baris-total"><td>Total</td><td class="angka">${rp(t.saldoAwal)}</td><td class="angka">${rp(t.pemasukan)}</td><td class="angka">${rp(t.pengeluaran)}</td><td class="angka">${rp(t.saldoAkhir)}</td></tr>
+        </tbody>
+      </table></div>
+      <p class="muted kecil">Angka total tidak menghitung serah terima antar kas karena hanya perpindahan dana. Rincian transaksi hanya dapat dilihat pengurus.</p>
+    </section>`;
+}
+
+async function viewDashboard(periode) {
+  const adm = AKUN.peran === 'administrator';
+  const [r, k] = await Promise.all([
+    panggil('dashboard'),
+    adm ? Promise.resolve(null) : panggil('ringkasanKeuangan', { periode: periode || periodeSekarang() })
+  ]);
   if (!r.success) return;
   let kartu;
   if (r.warga) {
@@ -285,9 +487,12 @@ async function viewDashboard() {
           + stat('Anggota keluarga', s.jumlahAnggota, 'Anggota aktif');
     if (s.akunAktif !== undefined) kartu += stat('Akun aktif', s.akunAktif, 'Pengguna aktif') + stat('Akun terkunci', s.akunTerkunci, 'Akibat login gagal');
   }
-  $('#view').innerHTML = `<section class="hero-dash"><h1>Selamat datang, ${esc(AKUN.nama)}</h1><p class="hero-sub">RT02/RW29 Perumahan Gading Elok 1</p></section>
-    <p class="muted">${esc(PERAN[AKUN.peran])}</p>
-    <div class="grid-kartu">${kartu}</div>`;
+  $('#view').innerHTML = `
+    <section class="hero-dash"><h1>Selamat datang, ${esc(AKUN.nama)}</h1><p class="hero-sub">RT02/RW29 Perumahan Gading Elok 1</p><span class="chip">${esc(PERAN[AKUN.peran])}</span></section>
+    <h2 class="judul-bagian">Menu cepat</h2>${tileMenu()}
+    <h2 class="judul-bagian">Ringkasan</h2>
+    <div class="grid-kartu">${kartu}</div>
+    ${bagianKeuangan(k)}`;
 }
 
 // ============================================
@@ -1420,7 +1625,7 @@ document.addEventListener('click', (e) => {
   if ($('#sidebar').classList.contains('buka') && !e.target.closest('#sidebar') && !e.target.closest('#btn-menu')) {
     tutupMenu();
   }
-  const el = e.target.closest('[data-go],[data-tab],[data-anggota],[data-aksi],[data-verif],[data-laporan],[data-konfirmasi],[data-surat],[data-edit-peng],[data-reset-form],[data-batal-agenda],[data-lampiran],[data-tanggapi],[data-pratinjau],[data-kirim-pengingat],[data-mata],#btn-keluar,#btn-menu');
+  const el = e.target.closest('[data-go],[data-tab],[data-anggota],[data-aksi],[data-verif],[data-laporan],[data-konfirmasi],[data-surat],[data-edit-peng],[data-reset-form],[data-batal-agenda],[data-lampiran],[data-tanggapi],[data-pratinjau],[data-kirim-pengingat],[data-mata],#btn-keluar,#btn-menu,#btn-tutup-menu');
   if (!el) return;
   e.preventDefault();
   if (el.dataset.go) go(el.dataset.go);
@@ -1444,6 +1649,7 @@ document.addEventListener('click', (e) => {
   else if (el.hasAttribute('data-kirim-pengingat')) kirimPengingatSekarang();
   else if (el.id === 'btn-keluar') keluar();
   else if (el.id === 'btn-menu') toggleMenu();
+  else if (el.id === 'btn-tutup-menu') tutupMenu();
 });
 
 document.addEventListener('submit', async (e) => {
@@ -1459,7 +1665,7 @@ document.addEventListener('submit', async (e) => {
     'form-ajukan': kirimAjukan, 'form-perbaiki': kirimPerbaiki, 'form-tinjau': kirimTinjau,
     'form-pengumuman': kirimPengumuman, 'form-agenda': kirimAgenda, 'form-galeri': kirimGaleri,
     'form-notulen': kirimNotulen, 'form-pengaduan': kirimPengaduan, 'form-tanggapi': kirimTanggapi,
-    'form-jadwal': kirimJadwal, 'form-uji': kirimUji, 'form-input-anggota': kirimInputAnggota
+    'form-jadwal': kirimJadwal, 'form-uji': kirimUji, 'form-input-anggota': kirimInputAnggota, 'form-periode-dash': (f) => viewDashboard(new FormData(f).get('periode'))
   }[f.id];
   if (!handler) return;
   const tombol = f.querySelector('[type=submit]');
@@ -1499,6 +1705,7 @@ let _lbl = 0;
 new MutationObserver(() => { cancelAnimationFrame(_lbl); _lbl = requestAnimationFrame(labelTabel); }).observe($('#view'), { childList: true, subtree: true });
 
 document.addEventListener('input', (e) => {
+  if (e.target.closest && e.target.closest('#view')) FORM_KOTOR = true;
   if (e.target.id !== 'cari-rumah') return;
   const q = e.target.value.trim().toLowerCase();
   document.querySelectorAll('#tabel-rumah tbody tr').forEach(tr => { tr.hidden = !!q && !tr.textContent.toLowerCase().includes(q); });
